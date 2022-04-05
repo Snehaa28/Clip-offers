@@ -1,0 +1,132 @@
+package com.abc.cartservice.integration;
+
+import com.albertsons.cartservice.configurations.WireMockInitializer;
+import com.albertsons.cartservice.controller.CartController;
+import com.albertsons.cartservice.resources.model.AddItemResponse;
+import com.albertsons.cartservice.resources.model.ItemInfo;
+import com.albertsons.cartservice.services.implementation.CartServiceImpl;
+import com.albertsons.cartservice.services.interfaces.CartService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static org.mockito.Mockito.mock;
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
+
+@SpringBootTest
+@TestPropertySource(locations = "classpath:application-test.properties")
+@ContextConfiguration(initializers = WireMockInitializer.class)
+@RunWith(SpringRunner.class)
+@AutoConfigureMockMvc
+public class CartServiceImplIT {
+
+    @Autowired
+    private CartService cartService;
+
+    @Autowired
+    private WebApplicationContext webApplicationContext;
+
+    @Autowired
+    private WireMockServer wireMockServer;
+
+    @Autowired
+    private CartController cartController;
+
+    private ResponseEntity<Object> responseEntity;
+
+    private MockMvc mockMvc;
+
+
+    private AddItemResponse mockAddItemResponse;
+    private ItemInfo itemInfo;
+    private static final String ITEM_ID = "0000000005409";
+    private static final String STORE_ID = "9879";
+    private static final String GUID = "200-160-1540234454991";
+    private static final String SUCCESS_CODE = "2000";
+    private static final String ERROR_CODE = "4000";
+    private static final String MESSAGE_ITEM_ADDED_SUCCESSFULLY = "Item Added to Cart Successfuly";
+    private static final String DB_ERROR = "database_error";
+    private static final String APP = "3pl";
+    private static final String ZERO = "0";
+    private static final String ONE = "1";
+
+    private static final String ADD_ITEM_TO_CART_URL = "/api/addItemToCart";
+
+    private ObjectMapper objectMapper = new ObjectMapper();
+
+    @Before
+    public void init() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+        cartService = mock(CartServiceImpl.class);
+        cartController = new CartController();
+        mockAddItemResponse = mock(AddItemResponse.class);
+        itemInfo = mock(ItemInfo.class);
+        responseEntity = mock(ResponseEntity.class);
+        itemInfo = new ItemInfo();
+        itemInfo.setItem_id("4082");
+        itemInfo.setScan_code("208-99876-654");
+        itemInfo.setUpc_type("upca");
+        itemInfo.setQuantity(0);
+    }
+
+    @Test
+    public void addItemToCart() throws Exception {
+        wireMockServer.stubFor(put(urlPathMatching("/api")).willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json").withBodyFile("itemInfo.json")));
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.set("storeId", STORE_ID);
+        httpHeaders.set("guid", GUID);
+        httpHeaders.set("app", APP);
+        String request = objectMapper.writeValueAsString(itemInfo);
+        mockMvc.perform(MockMvcRequestBuilders
+                        .put(ADD_ITEM_TO_CART_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .headers(httpHeaders)
+                        .content(request)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andDo(print())
+                .andExpect(MockMvcResultMatchers.status().isOk());
+    }
+
+    @Test
+    public void addItemToCartFail() throws Exception {
+        wireMockServer.stubFor(put(urlPathMatching("/api")).willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json").withBodyFile("itemInfo.json")));
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.set("storeId", "");
+        httpHeaders.set("guid", "");
+        httpHeaders.set("app", APP);
+        String request = objectMapper.writeValueAsString(itemInfo);
+        mockMvc.perform(MockMvcRequestBuilders
+                        .put(ADD_ITEM_TO_CART_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .headers(httpHeaders)
+                        .content(request)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andDo(print())
+                .andExpect(MockMvcResultMatchers.status().is4xxClientError());
+    }
+
+    @After
+    public void after() {
+        this.wireMockServer.resetAll();
+    }
+}
