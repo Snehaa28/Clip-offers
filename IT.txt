@@ -1,0 +1,54 @@
+package com.albertsons.cartservice.integration;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
+
+
+@SpringBootTest
+@RunWith(SpringRunner.class)
+@AutoConfigureMockMvc
+public class ClearCartIT {
+
+    @Autowired
+    private WebApplicationContext webApplicationContext;
+
+    private MockMvc mockMvc;
+
+    private static final String CLEAR_CART_QUERY_STRING = "/api/clearcart";
+    private static final String GUID = "200-160-1540234454991";
+    private static final String STORE_ID = "9879";
+
+    @Before
+    public void init() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+    }
+
+    @Test
+    public void testClearCart() throws Exception {
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.set("storeid", STORE_ID);
+        httpHeaders.set("guid", GUID);
+        mockMvc.perform(MockMvcRequestBuilders
+                        .put(CLEAR_CART_QUERY_STRING)
+                        .headers(httpHeaders)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andDo(print())
+                .andExpect(MockMvcResultMatchers.status().isOk());
+    }
+
+
+}
