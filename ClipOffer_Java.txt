@@ -1,0 +1,93 @@
+// this should be in your Controller calss
+
+======================================
+@RequestMapping(value = "/clipOffer", method = RequestMethod.POST)
+	public ClipJ4UResponse clipOffer(@RequestHeader String storeId, @RequestHeader String upcId,
+			@RequestHeader String oktatoken, @RequestBody ClippOfferRequest offerRequest) throws Exception {
+		if (oktatoken == null || offerRequest == null) {
+			throw new InvalidClipOfferRequestException();
+		}
+		try {
+			return clientService.applyClipOffer(storeId, oktatoken, offerRequest);
+		} catch (Exception e) {
+			throw new Exception();
+		}
+
+	}
+
+
+=========================================
+
+Create these exceptions on exception package
+=====================================================
+
+public class OfferAppliledfailedException extends Exception {
+
+}
+
+
+public class InvalidClipOfferRequestException extends RuntimeException {
+
+}
+===========================================================
+
+Declare this method in you Interface 
+==============================================
+
+	public ClipJ4UResponse applyClipOffer(String storeId,String oktatoken , ClippOfferRequest offerRequest ) throws ClipOfferUrlFailedException,OfferAppliledfailedException;
+	
+	=====================================
+	copy this to your serviceImpl class
+	==============================================3.
+	
+	@Override
+	public ClipJ4UResponse applyClipOffer(String storeId, String oktatoken, ClippOfferRequest offerRequest)
+			throws ClipOfferUrlFailedException , OfferAppliledfailedException{
+
+		try {
+
+			// Preparing Body
+			List<Item> items = preapresRequestBody(offerRequest);
+
+			// Preparing Headers
+			HttpHeaders headers = new HttpHeaders();
+			headers.set("swy_sso_token", oktatoken);
+			headers.set("x-swy_banner", "safeway");
+			headers.set("x-swy_api_key", "emjou");
+			headers.set("x-swyconsumerdirectorypro", oktatoken);
+			headers.set("x-swy_version", "1.0");
+			HttpEntity<List<Item>> entity = new HttpEntity<>(items, headers);
+
+			// Preparing URL
+
+			String clippOffer = "give your URL from env";
+			String url = clippOffer + Integer.parseInt(storeId, 10);
+
+			ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+			if (response != null) {
+
+				// Once we got the reponse body will implement it
+			} else {
+
+				//throw new OfferAppliledfailedException();
+
+			}
+		} catch (Exception e) {
+			throw new ClipOfferUrlFailedException();
+		}
+
+		return null;
+	}
+
+	private List<Item> preapresRequestBody(ClippOfferRequest offerRequest) {
+		List<Offer> offers = offerRequest.getOffers();
+
+		Offer offer = offers.get(0);
+
+		List<Item> items = new ArrayList<>();
+
+		items.add(Item.builder().clipType("C").itemId(offer.getOfferId()).itemType(offer.getOfferPgm()).build());
+		items.add(Item.builder().clipType("L").itemId(offer.getOfferId()).itemType(offer.getOfferPgm()).build());
+
+		return items;
+	}
