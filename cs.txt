@@ -1,0 +1,195 @@
+package com.sample.cartservice.services.implementation;
+
+import com.albertsons.cartservice.exceptions.ItemNotAddedException;
+import com.albertsons.cartservice.gateway.IStoreGateway;
+import com.albertsons.cartservice.resources.constants.CartConstants;
+import com.albertsons.cartservice.resources.mapper.CartMapper;
+import com.albertsons.cartservice.resources.mapper.ItemMapper;
+import com.albertsons.cartservice.resources.model.AddItemResponse;
+import com.albertsons.cartservice.resources.model.Cart;
+import com.albertsons.cartservice.resources.model.CartItem;
+import com.albertsons.cartservice.resources.model.ItemInfo;
+import com.albertsons.cartservice.services.interfaces.CartService;
+import com.albertsons.cartservice.services.persistence.ICartAccess;
+import com.albertsons.cartservice.validation.CartServiceValidation;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.util.Date;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+public class CartServiceImpl implements CartService {
+
+    @Autowired
+    private CartServiceValidation cartServiceValidation;
+
+    @Autowired
+    private IStoreGateway storeGateway;
+
+    @Autowired
+    private ICartAccess cartAccess;
+
+    @Autowired
+    private ItemMapper itemMapper;
+
+    @Autowired
+    private CartMapper cartMapper;
+
+    @Override
+    public AddItemResponse addItemToCart(String storeId, String guid, String app, ItemInfo itemInfo) throws ItemNotAddedException {
+
+        log.debug("Requested item details to add into the cart " + itemInfo);
+        AddItemResponse addItemResponse = cartServiceValidation.validateAddItemRequest(storeId, guid, itemInfo);
+        if (addItemResponse == null) {
+            try {
+                Optional<Cart> cartByGuidAndStoreId = Optional.ofNullable(cartAccess.findCartData(storeId, guid));
+                CartItem existingItem = doesItemExist(itemInfo, cartByGuidAndStoreId);
+                if (existingItem == null) {
+                    if (!cartByGuidAndStoreId.isPresent()) {
+                        return createNewCart(storeId, guid, app, itemInfo);
+                    } else {
+                        return addItemToExistingCart(storeId, app, itemInfo, cartByGuidAndStoreId.get());
+                    }
+                } else {
+                    if (cartByGuidAndStoreId.isPresent()) {
+                        return updateExistingItemInCart(itemInfo, cartByGuidAndStoreId.get(), app);
+                    }
+                }
+            } catch (Exception e) {
+                throw new ItemNotAddedException();
+            }
+        }
+        return addItemResponse;
+    }
+
+    public AddItemResponse updateExistingItemInCart(ItemInfo itemInfo, Cart cartToUpdate, String app) {
+        List<CartItem> items = cartToUpdate.getItems();
+        if (itemInfo.getQuantity() > getCartLimit(app) && !itemInfo.isBag_item()) {
+            return itemLimitError();
+        }
+        if (items != null) {
+            for (CartItem indexItem : items) {
+                if (indexItem != null && indexItem.getItem_id().equals(itemInfo.getItem_id())) {
+                    CartItem itemtoUpdate = itemMapper.prepareNewItem(itemInfo);
+                    items.set(items.indexOf(indexItem), itemtoUpdate);
+                }
+            }
+        }
+        cartToUpdate.setItems(items);
+        cartToUpdate.setTime_stamp(new Date().getTime());
+        try {
+            Cart updatedCart = cartAccess.saveCartData(cartToUpdate);
+            log.debug("Item updated to the cart successfully : " + updatedCart);
+            return buildAddItemResponse(CartConstants.MESSAGE_ITEM_UPDATED_SUCCESSFULLY);
+        } catch (Exception e) {
+            return dbQueryErrorResponse();
+        }
+    }
+
+    public AddItemResponse addItemToExistingCart(String storeId, String app, ItemInfo itemInfo, Cart cartToAdd) {
+        List<CartItem> items = cartToAdd.getItems();
+        int cartCount = items.stream().filter(item -> item.isBag_item()).collect(Collectors.toList()).size();
+        if (cartCount == 0 && !app.equals("3pl") && !storeGateway.getStoreHours(storeId)) {
+            return new AddItemResponse(CartConstants.ACK_ONE, CartConstants.ERROR_CODE,
+                    CartConstants.MESSAGE_OUT_OF_OPERATION, CartConstants.OUT_OF_OPERATION_ERROR,
+                    CartConstants.BACKEND_ERROR);
+        }
+        if ((cartCount >= getCartLimit(app) || itemInfo.getQuantity() > getItemLimit(app))
+                && !itemInfo.isBag_item()) {
+            return itemLimitError();
+        } else {
+            CartItem item = itemMapper.prepareNewItem(itemInfo);
+            item.setAdded_time_stamp(new Date().getTime());
+            items.add(item);
+            cartToAdd.setItems(items);
+            cartToAdd.setTime_stamp(new Date().getTime());
+            try {
+                Cart currentCart = cartAccess.saveCartData(cartToAdd);
+                log.debug("Item added to the cart successfully : " + currentCart);
+                return buildAddItemResponse(CartConstants.MESSAGE_ITEM_ADDED_SUCCESSFULLY);
+            } catch (Exception e) {
+                log.debug("Exception occured while saving cart with new item " + e.getLocalizedMessage());
+                return dbQueryErrorResponse();
+            }
+        }
+    }
+
+    private int getCartLimit(String app) {
+        int cartLimit = CartConstants.CART_LIMIT;
+        if (org.apache.commons.lang3.StringUtils.equalsIgnoreCase(app, CartConstants.APP_3PL)) {
+            cartLimit = 500;
+        }
+        return cartLimit;
+    }
+
+    private int getItemLimit(String app) {
+        int itemLimit = CartConstants.ITEM_LIMIT;
+        if (org.apache.commons.lang3.StringUtils.equalsIgnoreCase(app, CartConstants.APP_3PL)) {
+            itemLimit = 500;
+        }
+        return itemLimit;
+    }
+
+    public AddItemResponse itemLimitError() {
+        return new AddItemResponse(CartConstants.ACK_ONE, CartConstants.ERROR_CODE,
+                CartConstants.MESSAGE_ITEM_CART_ERROR, CartConstants.MAX_ITEM_ERROR, CartConstants.BACKEND_ERROR);
+    }
+
+    public AddItemResponse buildAddItemResponse(String message) {
+        return new AddItemResponse(CartConstants.ACK_ZERO, CartConstants.SUCCESSFULLY_ADDED_CODE,
+                message, StringUtils.EMPTY, StringUtils.EMPTY);
+    }
+
+    public AddItemResponse dbQueryErrorResponse() {
+        return new AddItemResponse(CartConstants.ACK_ONE, CartConstants.ERROR_CODE, CartConstants.MESSAGE_GENERIC1,
+                CartConstants.DB_ERROR, CartConstants.BACKEND_ERROR);
+    }
+
+    public CartItem doesItemExist(ItemInfo itemInfo, Optional<Cart> cart) {
+        CartItem existingItem = null;
+        if (cart.isPresent()) {
+            Cart existingCart = cart.get();
+            List<CartItem> cartItems = existingCart.getItems();
+            if (cartItems != null) {
+                for (CartItem cartItem : cartItems) {
+                    if (cartItem != null && cartItem.getItem_id() != null && cartItem.getItem_id().equals(itemInfo.getItem_id()) && cartItem.getStatus() != null && cartItem.getStatus().equals(CartConstants.ACTIVE)) {
+                        existingItem = cartItem;
+                    }
+                }
+            }
+        }
+        return existingItem;
+    }
+
+    public AddItemResponse createNewCart(String storeId, String guid, String app, ItemInfo itemInfo) {
+
+        AddItemResponse addItemResponse = checkAppAndStore(app, storeId, itemInfo);
+        if (addItemResponse == null) {
+            CartItem item = itemMapper.prepareNewItem(itemInfo);
+            Cart newCart = cartMapper.createNewCartData(guid, storeId, item);
+            Cart instertedCart = cartAccess.insertCartData(newCart);
+            log.debug("New cart created with the items:" + instertedCart);
+            return buildAddItemResponse(CartConstants.MESSAGE_ITEM_CREATED_SUCCESSFULLY);
+        }
+        return addItemResponse;
+    }
+
+    public AddItemResponse checkAppAndStore(String app, String storeId, ItemInfo itemInfo) {
+        boolean isOpenHour = storeGateway.getStoreHours(storeId);
+        if (app != null && !app.equals(CartConstants.APP_3PL) && !isOpenHour) {
+            return new AddItemResponse(CartConstants.ACK_ONE, CartConstants.ERROR_CODE,
+                    CartConstants.MESSAGE_OUT_OF_OPERATION, CartConstants.OUT_OF_OPERATION_ERROR,
+                    CartConstants.BACKEND_ERROR);
+        } else if (itemInfo != null && itemInfo.getQuantity() > CartConstants.ITEM_LIMIT) {
+            return new AddItemResponse(CartConstants.ACK_ONE, CartConstants.ERROR_CODE,
+                    CartConstants.MESSAGE_ITEM_CART_ERROR, CartConstants.MAX_ITEM_ERROR, CartConstants.BACKEND_ERROR);
+        }
+        return null;
+    }
+}
